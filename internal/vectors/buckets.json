@@ -1,0 +1,10 @@
+{
+  "description": "Percentage-rollout bucketing vectors. These are the wire contract, not regression pins: any component that evaluates rollouts must place these exact inputs in these exact buckets, or a device flips cohorts depending on who evaluated it. Source: FortressFlag_Backend internal/clientapi/bucket_test.go, published here per ADR-0013. A rule with rollout percentage p matches only when bucket < p.",
+  "algorithm": "uint64_be(SHA-256(deviceID + \":\" + flagKey)[0..8]) mod 100",
+  "vectors": [
+    { "deviceID": "dev_AAAAAAAAAAAAAAAAAAAAAA", "flagKey": "checkout-cta", "bucket": 52 },
+    { "deviceID": "dev_AAAAAAAAAAAAAAAAAAAAAA", "flagKey": "dark-mode", "bucket": 90 },
+    { "deviceID": "dev_BBBBBBBBBBBBBBBBBBBBBB", "flagKey": "checkout-cta", "bucket": 12 },
+    { "deviceID": "dev_u9DoiiV1kJ7-qb3W8mHu0g", "flagKey": "checkout-cta", "bucket": 15 }
+  ]
+}

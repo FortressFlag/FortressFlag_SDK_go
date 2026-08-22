@@ -1,0 +1,65 @@
+# golangci-lint configuration.
+#
+# Mirrors the backend's linter set where it applies to a library (Founding §8.1, §9);
+# formatting and lint are never a review topic. The set is chosen around the failure modes
+# that hurt most in code embedded in customers' processes: silently ignored errors, security
+# defects, and anything that could surprise the host.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose # an unclosed response body leaks a connection in the customer's process
+    - errorlint # forces %w and errors.Is/As, so error chains stay inspectable (§8.1)
+    - gocritic # broad correctness/style checks
+    - gosec # SAST (§7.5)
+    - misspell
+    - nilerr # returning nil after checking an error is almost always a bug
+    - noctx # every request-scoped call must carry a context (§8.1)
+    - revive # naming, exported-symbol docs
+    - unconvert
+    - usestdlibvars
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct field ordering is chosen for readability, not packing
+
+    revive:
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers]
+        - name: context-as-argument
+        - name: error-strings
+        - name: error-return
+        - name: indent-error-flow
+
+  exclusions:
+    rules:
+      # Tests may construct deliberately invalid input and ignore errors that production code
+      # must not. noctx is excluded because httptest is the idiomatic way to build requests in
+      # tests; the rule still applies to everything that ships.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/FortressFlag/FortressFlag_SDK_go

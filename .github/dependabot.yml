@@ -1,0 +1,24 @@
+# Automated dependency updates.
+#
+# SOC 2 (CC7.1) asks for a *process* that finds and remediates vulnerable components, not just a
+# scanner that reports them.
+#
+# ONE ecosystem, deliberately: the workflow's actions. There is no gomod entry because the
+# SDK's runtime dependency policy is ZERO dependencies (ADR-0016) — the require block in go.mod
+# is empty and CI fails the build if a go.sum appears. There is nothing for a gomod updater to
+# watch, and adding the entry would imply there could be.
+#
+# A compromised or abandoned action runs with our token — and in a repository that will
+# eventually publish a distributable artifact.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, ci]
+    groups:
+      actions:
+        patterns: ["*"]

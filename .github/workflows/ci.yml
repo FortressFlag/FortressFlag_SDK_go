@@ -1,0 +1,157 @@
+# Continuous integration for the Go server SDK.
+#
+# This workflow IS the merge gate described in Founding CLAUDE.md §7.5 and §9. It matters more
+# here than almost anywhere else: we cannot recall a shipped SDK, so anything that gets past
+# this gate lives inside customers' server processes until they upgrade on their own schedule.
+#
+# NOTE for whoever adds the branch ruleset: add these three job names as required checks
+# *after* this file lands on `development` (docs/compliance/change-management.md in
+# FortressFlag_Backend). Requiring a check that has never reported blocks every merge
+# permanently.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [development]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Build, lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Both supported Go releases run in THIS one job, sequentially, rather than as a
+      # matrix: a matrix leg reports its own check name, and the required-check list in the
+      # branch ruleset names exactly one. The floor (1.25, the go.mod directive) runs the
+      # full gate; the newest release re-runs build + tests to catch anything its compiler
+      # or runtime surfaces differently.
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go build (1.25)
+        run: go build ./...
+
+      - name: go vet (1.25)
+        run: go vet ./...
+
+      - name: golangci-lint
+        # v8+ is required for golangci-lint v2 configs; pinned so a linter that changes under
+        # us cannot turn green builds red (the backend's pin, same version).
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
+      - name: Unit tests (1.25)
+        # -race catches data races that only show up under concurrency in production — the
+        # lock-free snapshot reads are exactly the code -race exists for.
+        run: go test ./... -race -count=1
+
+      - name: go.mod is tidy — and has no dependencies
+        # Two gates in one diff: tidy-ness, and the empty require block that IS the
+        # zero-runtime-dependencies rule (CLAUDE.md, ADR-0016). A go.sum appearing here means
+        # a dependency arrived; that is a user-owned supply-chain decision, not a green build.
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod || { echo "::error::go.mod is not tidy."; exit 1; }
+          if [ -f go.sum ]; then
+            echo "::error::go.sum exists — a runtime dependency was added. The require block stays empty (ADR-0016)."
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: go build (1.26)
+        run: go build ./...
+
+      - name: Unit tests (1.26)
+        run: go test ./... -race -count=1
+
+  crash-primitives:
+    name: No crash primitives in library sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Grep for crash primitives
+        # Deliberately a dumb grep, and deliberately separate from the linter. The lint
+        # config is one pull request away from being relaxed with a plausible-looking
+        # justification; this is harder to weaken quietly, and a reviewer seeing it removed
+        # knows exactly what it meant.
+        #
+        # A panic that escapes this library kills the customer's PROCESS — no error handling
+        # above it helps (Founding §8.1). Library sources only: tests may panic (the harness
+        # catches them), and cmd/ holds example programs whose exit codes are their own.
+        # Call-position forms only, so prose in comments cannot cry wolf.
+        run: |
+          sources=$(find . -name '*.go' ! -name '*_test.go' ! -path './cmd/*')
+          if grep -nE '\bpanic\(|\bos\.Exit\(|\blog\.Fatal' $sources; then
+            echo "::error::Crash primitives found in library sources. The SDK must never take down a customer's process."
+            exit 1
+          fi
+          echo "No crash primitives in library sources."
+
+  security:
+    name: Security scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gitleaks needs history to scan commits, not just the working tree.
+          fetch-depth: 0
+
+      - name: gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          # SHA-256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's published
+          # checksums.txt. Pinning the version alone still trusts whatever bytes that URL
+          # serves on the day CI runs; this is what makes the download reproducible. Bump both
+          # lines together — a version bumped without its checksum fails loudly here, which is
+          # intended.
+          #
+          # Deliberately NOT gitleaks/gitleaks-action@v2. That action requires a paid licence
+          # for organisation-owned repositories, so it simply fails here — and a floating @v2
+          # tag in the job whose entire subject is supply-chain hygiene is the wrong shape
+          # anyway. This matches the backend, iOS, Android and web security jobs exactly.
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          # pipefail matters: without it a curl that dies mid-stream is masked by a tar that
+          # happens to succeed on the truncated prefix.
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          # Unpacked outside the checkout so the scanner never sees its own artefacts.
+          "$RUNNER_TEMP/gitleaks" git . --redact --no-banner
+
+      - name: No checked-in signing keys
+        # A private key appearing in this repo would mean someone made signing convenient,
+        # which is how signing stops being worth anything.
+        run: |
+          if grep -rlE 'BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY' . --exclude-dir=.git; then
+            echo "::error::A private key is checked into this repository."
+            exit 1
+          fi
+          echo "No private keys checked in."
