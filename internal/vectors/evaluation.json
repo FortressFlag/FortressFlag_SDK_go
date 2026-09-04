@@ -1,5 +1,5 @@
 {
-  "description": "Evaluation-semantics vectors. These are the wire contract, not regression pins: any component that evaluates rules must produce these exact outcomes, or the same user would see different flag values depending on which component answered. Source: FortressFlag_Backend internal/clientapi/evaluate_vectors_test.go — the JSON is generated from that table, so every case here is one the backend evaluator actually ran against; published per ADR-0016. Flag configs use the server export's wire shape (server-contract-v1.md) so an SDK can feed them through its own payload decoder. Semantics in brief: rules walk in order, first match wins; conditions AND within a rule and an empty list holds vacuously; a condition whose tag key is absent does not hold; eq/neq are exact, case-sensitive, untrimmed string comparison; semver operators split on dots, compare numerically, read missing components as 0, and an unparseable value on either side makes the condition not hold; an unknown operator never matches; a rolloutPercentage p matches only contexts whose bucket (vectors/buckets.json — the contextKey is the bucket input) is strictly below p, and a gated-out context falls THROUGH to later rules; no match serves the default, and a multivariate flag with no default has no value (noValue: the SDK serves its caller's fallback).",
+  "description": "Evaluation-semantics vectors. These are the wire contract, not regression pins: any component that evaluates rules must produce these exact outcomes, or the same user would see different flag values depending on which component answered. Source: FortressFlag_Backend internal/clientapi/evaluate_vectors_test.go — the JSON is generated from that table, so every case here is one the backend evaluator actually ran against; published per ADR-0016. Flag configs use the server export's wire shape (server-contract-v1.md) so an SDK can feed them through its own payload decoder. Semantics in brief: rules walk in order, first match wins; conditions AND within a rule and an empty list holds vacuously; a condition whose tag key is absent does not hold; eq/neq are exact, case-sensitive, untrimmed string comparison; contains is a case-sensitive, untrimmed substring match (ADR-0023); semver operators split on dots, compare numerically, read missing components as 0, and an unparseable value on either side makes the condition not hold; an unknown operator never matches; a rolloutPercentage p matches only contexts whose bucket (vectors/buckets.json — the contextKey is the bucket input) is strictly below p, and a gated-out context falls THROUGH to later rules; no match serves the default, and a multivariate flag with no default has no value (noValue: the SDK serves its caller's fallback).",
   "vectors": [
     {
       "name": "first-match-wins",
@@ -326,6 +326,30 @@
       ] },
       "input": { "contextKey": "user-1", "flagKey": "retry-limit", "tags": {} },
       "expected": { "value": 5 }
+    },
+    {
+      "name": "contains-matches-a-substring",
+      "flag": { "kind": "boolean", "default": false, "rules": [
+        { "conditions": [ { "tagKey": "item", "operator": "contains", "value": "banana" } ], "serve": true }
+      ] },
+      "input": { "contextKey": "user-1", "flagKey": "fruit-picker", "tags": { "item": "ripe-banana-bunch" } },
+      "expected": { "value": true }
+    },
+    {
+      "name": "contains-is-case-sensitive",
+      "flag": { "kind": "boolean", "default": false, "rules": [
+        { "conditions": [ { "tagKey": "item", "operator": "contains", "value": "banana" } ], "serve": true }
+      ] },
+      "input": { "contextKey": "user-1", "flagKey": "fruit-picker", "tags": { "item": "Banana split" } },
+      "expected": { "value": false }
+    },
+    {
+      "name": "contains-matches-the-whole-string",
+      "flag": { "kind": "boolean", "default": false, "rules": [
+        { "conditions": [ { "tagKey": "item", "operator": "contains", "value": "banana" } ], "serve": true }
+      ] },
+      "input": { "contextKey": "user-1", "flagKey": "fruit-picker", "tags": { "item": "banana" } },
+      "expected": { "value": true }
     }
   ]
 }

@@ -1,5 +1,7 @@
 package fortressflag
 
+import "strings"
+
 // Local evaluation — the reason this SDK exists (Founding §3: evaluation happens as close to
 // the customer as possible), and a byte-for-byte behavioural PORT of the backend's
 // clientapi evaluateValue walk. The two implementations are pinned to each other by
@@ -11,6 +13,7 @@ package fortressflag
 const (
 	opEq        = "eq"
 	opNeq       = "neq"
+	opContains  = "contains"
 	opSemverEq  = "semver_eq"
 	opSemverGt  = "semver_gt"
 	opSemverGte = "semver_gte"
@@ -26,7 +29,8 @@ const (
 //   - A rule matches when EVERY condition holds — AND within a rule, first-match-wins across
 //     rules. An EMPTY condition list holds vacuously (the terminal "everyone else" rule).
 //   - A condition whose tag key is absent from the context's tags does not hold; never an
-//     error. eq/neq are exact string comparison, case-sensitive, no trimming. The semver
+//     error. eq/neq are exact string comparison and contains is substring match (backend
+//     ADR-0023) — all case-sensitive, no trimming. The semver
 //     operators compare via parseVersion; an unparseable value on EITHER side makes the
 //     condition not hold. An operator this binary does not recognise does not hold — fail
 //     closed into the default (Founding §8.3).
@@ -78,6 +82,8 @@ func conditionHolds(condition flagCondition, tagValue string) bool {
 		return tagValue == condition.Value
 	case opNeq:
 		return tagValue != condition.Value
+	case opContains:
+		return strings.Contains(tagValue, condition.Value)
 	case opSemverEq, opSemverGt, opSemverGte, opSemverLt, opSemverLte:
 		context, ok := parseVersion(tagValue)
 		if !ok {
