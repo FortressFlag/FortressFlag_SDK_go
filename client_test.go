@@ -28,7 +28,9 @@ func (s *scriptedFetcher) fetchRuleset(context.Context, string) fetchOutcome {
 
 func testClient(t *testing.T, fetcher rulesetFetcher, mutate func(*Configuration)) *Client {
 	t.Helper()
-	configuration := Configuration{Key: "ffs_dev_k"}
+	// Fixtures are unsigned, so the default (required, production key) is opted out here and
+	// the signature tests opt back in per case.
+	configuration := Configuration{Key: "ffs_dev_k", Signature: SignatureDisabled}
 	if mutate != nil {
 		mutate(&configuration)
 	}

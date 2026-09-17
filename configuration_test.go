@@ -69,8 +69,11 @@ func TestResolveConfigurationDefaults(t *testing.T) {
 	if resolved.httpTimeout != 10*time.Second {
 		t.Errorf("timeout = %v, want 10s", resolved.httpTimeout)
 	}
-	if resolved.signature.required {
-		t.Error("signature policy defaulted to required; the backend does not sign yet (M4)")
+	if !resolved.signature.required {
+		t.Error("signature policy did not default to required (ADR-0025)")
+	}
+	if _, ok := resolved.signature.trustedKeys["prod-2026-09-k1"]; !ok {
+		t.Error("default trust store lacks prod-2026-09-k1")
 	}
 }
 
@@ -102,5 +105,22 @@ func TestSignatureRequiredCopiesTheTrustStore(t *testing.T) {
 	keys["k1"][0] = 9
 	if len(policy.trustedKeys) != 1 || policy.trustedKeys["k1"][0] != 1 {
 		t.Fatal("SignatureRequired shares the caller's map; mutation after construction leaked in")
+	}
+}
+
+func TestSignatureDisabledIsExplicitAndTheProductionKeyIs32Bytes(t *testing.T) {
+	resolved, err := resolveConfiguration(Configuration{Key: "ffs_dev_k", Signature: SignatureDisabled})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.signature.required {
+		t.Error("an explicit SignatureDisabled was overridden by the default")
+	}
+	key := TrustedKeysFortressFlagProduction["prod-2026-09-k1"]
+	if len(key) != 32 {
+		t.Errorf("production key is %d bytes, want 32", len(key))
+	}
+	if len(TrustedKeysFortressFlagProduction) != 1 {
+		t.Errorf("production trust store has %d keys, want 1", len(TrustedKeysFortressFlagProduction))
 	}
 }

@@ -110,8 +110,8 @@ func TestChaosSignatureHostileEnvelopesAllRejectUnderRequired(t *testing.T) {
 
 	// Seed via record with a disabled-policy verification path is impossible here — the
 	// client's policy is required — so the held-value invariant is "still the fallback":
-	// under required, NOTHING can be accepted until M4 supplies the primitive, including a
-	// plausibly-signed envelope. The stub can reject a forgery but never accept one.
+	// under required, nothing that is not signed by the trusted key can be accepted,
+	// including a plausibly-shaped signature that does not verify.
 	payload := fixturePayloadJSON(nil)
 	for _, sig := range []string{"", "garbage", "ed25519:AAAA", "p256:k1:AAAA", "ed25519:unknown:AAAA", "ed25519:k1:AAAA"} {
 		client.record(fetchOutcome{kind: fetchSuccess, raw: fixtureEnvelope(payload, sig)})
