@@ -1,6 +1,7 @@
 package fortressflag
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"strings"
 	"time"
@@ -68,7 +69,7 @@ func verifyEnvelope(raw []byte, policy SignaturePolicy, expect expectations) (ve
 	}
 
 	if policy.required {
-		if code, accepted := checkSignature(envelope.Sig, policy); !accepted {
+		if code, accepted := checkSignature(envelope.Sig, payloadBytes, policy); !accepted {
 			return verifiedEnvelope{}, code, false
 		}
 	}
@@ -109,22 +110,17 @@ func verifyEnvelope(raw []byte, policy SignaturePolicy, expect expectations) (ve
 	return verifiedEnvelope{raw: raw, payload: payload}, "", true
 }
 
-// checkSignature is the signature PLUMBING with the crypto primitive deliberately absent
-// (ADR-0015/0016): backend M4's algorithm ADR — which must now decide with ruleset-sized
-// payloads in scope — has not shipped. A missing signature under a required policy is
-// rejected (fail closed, the shipped client-SDK posture byte for byte); the
-// `algorithm:keyID:signature` splitting and trust-store lookup are real; and a signature
-// that survives those checks is still rejected as badSignature, because no primitive exists
-// to accept it. When M4 lands, its ADR decides the primitive and this is where it goes —
-// with a real trust store, this stub can reject valid payloads but can never accept a
-// forged one.
-func checkSignature(sig *string, policy SignaturePolicy) (rejectionCode, bool) {
+// checkSignature verifies `algorithm:keyID:signature` with pure Ed25519 over payloadBytes —
+// the payload exactly as transmitted, never a re-serialisation (backend ADR-0025,
+// contract-v1 §Signing keys). A missing signature under a required policy is rejected: fail
+// closed, the client-SDK posture byte for byte.
+func checkSignature(sig *string, payloadBytes []byte, policy SignaturePolicy) (rejectionCode, bool) {
 	if sig == nil || *sig == "" {
 		return rejectMissingSignature, false
 	}
 
-	// Split at the first two colons so a key ID may contain a colon later without a
-	// breaking parse change.
+	// Split at the first two colons: the SIGNATURE part may carry extra colons, the key ID
+	// never can (the backend refuses to mint one; contract-v1 §Signing keys).
 	first := strings.Index(*sig, ":")
 	second := -1
 	if first >= 0 {
@@ -146,14 +142,18 @@ func checkSignature(sig *string, policy SignaturePolicy) (rejectionCode, bool) {
 	if signature == "" {
 		return rejectMalformedSignature, false
 	}
-	if _, err := base64.RawURLEncoding.DecodeString(signature); err != nil {
+	sigBytes, err := base64.RawURLEncoding.DecodeString(signature)
+	if err != nil {
 		return rejectMalformedSignature, false
 	}
-	if _, known := policy.trustedKeys[keyID]; !known {
+	key, known := policy.trustedKeys[keyID]
+	if !known || len(key) != ed25519.PublicKeySize {
+		// A malformed key in our own trust store reads as "cannot verify with this key" so
+		// one bad entry does not disable a rotation set (the iOS rule).
 		return rejectUnknownKeyID, false
 	}
-
-	// The primitive gap, made explicit: the payload bytes are deliberately unused beyond
-	// this point until M4 supplies the algorithm.
-	return rejectBadSignature, false
+	if !ed25519.Verify(ed25519.PublicKey(key), payloadBytes, sigBytes) {
+		return rejectBadSignature, false
+	}
+	return "", true
 }

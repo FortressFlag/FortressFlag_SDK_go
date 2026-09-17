@@ -34,6 +34,9 @@ func main() {
 		Key:       env("FF_SERVER_KEY", seedKey),
 		BaseURL:   env("FF_BASE_URL", "http://localhost:8080"),
 		CachePath: os.Getenv("FF_CACHE_PATH"),
+		// The default policy verifies against FortressFlag production's key; the seeded local
+		// backend signs with a throwaway dev key or not at all, so the example opts out.
+		Signature: fortressflag.SignatureDisabled,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "configuration:", err)

@@ -101,8 +101,9 @@ func TestVerifyRejectsTheFuture(t *testing.T) {
 }
 
 // The fail-closed signature matrix: under a required policy with a trust store, every
-// signature shape rejects — absent, malformed, wrong algorithm, unknown key, and (until M4
-// supplies the primitive) even a plausible one. The stub can never accept a forgery.
+// signature shape that is not a valid signature by the trusted key rejects — absent,
+// malformed, wrong algorithm, unknown key, and a plausibly-shaped one that does not verify.
+// The signed-and-verifying cases live in verifier_signing_test.go.
 func TestVerifySignatureRequiredFailsClosed(t *testing.T) {
 	policy := SignatureRequired(map[string][]byte{"k1": make([]byte, 32)})
 	payload := fixturePayloadJSON(nil)
@@ -120,6 +121,7 @@ func TestVerifySignatureRequiredFailsClosed(t *testing.T) {
 		{"wrong algorithm", "p256:k1:AAAA", rejectUnsupportedAlgorithm},
 		{"unknown key", "ed25519:unknown:AAAA", rejectUnknownKeyID},
 		{"plausible but unverifiable", "ed25519:k1:AAAA", rejectBadSignature},
+		{"a third colon lands in the signature part, never the key id", "ed25519:k1:extra:AAAA", rejectMalformedSignature},
 	} {
 		raw := fixtureEnvelope(payload, tc.sig)
 		if _, code, ok := verifyEnvelope(raw, policy, expectDev(true)); ok || code != tc.want {

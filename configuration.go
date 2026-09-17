@@ -1,6 +1,7 @@
 package fortressflag
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -32,9 +33,11 @@ type Configuration struct {
 	// only the ruleset envelope, never the key and never any evaluation context.
 	CachePath string
 
-	// Signature is how the SDK treats the envelope's signature. The default is
-	// SignatureDisabled — the backend does not sign yet (roadmap M4); when it does, a
-	// SignatureRequired policy rejects every unverifiable payload, fail closed.
+	// Signature is how the SDK treats the envelope's signature. Unset — the default — is
+	// SignatureRequired(TrustedKeysFortressFlagProduction): every payload FortressFlag
+	// production serves is verified, fail closed (backend ADR-0025). SignatureDisabled is the
+	// explicit opt-out for a local backend that does not sign; a staging deployment passes
+	// the staging key explicitly.
 	Signature SignaturePolicy
 
 	// HTTPTimeout is the per-request timeout. Short on purpose: a slow ruleset fetch must
@@ -43,30 +46,56 @@ type Configuration struct {
 }
 
 // SignaturePolicy is how the SDK treats the signature on a ruleset envelope. Use
-// SignatureDisabled (the zero value) or SignatureRequired.
+// SignatureDisabled or SignatureRequired; the zero value resolves to
+// SignatureRequired(TrustedKeysFortressFlagProduction).
 type SignaturePolicy struct {
+	// explicit distinguishes a caller's SignatureDisabled from an unset field, so the unset
+	// field can default to required without the disabled value becoming unreachable.
+	explicit bool
 	required bool
-	// trustedKeys maps the key IDs that may appear in an envelope's sig field to public key
-	// bytes. Keyed so rotation is a config publish, not a redeploy.
+	// trustedKeys maps the key IDs that may appear in an envelope's sig field to raw 32-byte
+	// Ed25519 public keys. Keyed so rotation is a config publish, not a redeploy.
 	trustedKeys map[string][]byte
 }
 
-// SignatureDisabled accepts unsigned envelopes — the only workable policy until the
-// backend's signing milestone (M4) ships, and therefore the default. A named, greppable
-// value rather than a silent fallback, so "why is this not verifying?" has an answer in the
-// customer's own source.
-var SignatureDisabled = SignaturePolicy{}
+// SignatureDisabled accepts unsigned envelopes — for a local backend without a signing key
+// (`FF_SIGNING_*` unset). A named, greppable value rather than a silent fallback, so "why is
+// this not verifying?" has an answer in the customer's own source.
+var SignatureDisabled = SignaturePolicy{explicit: true}
 
 // SignatureRequired rejects every envelope whose signature cannot be verified against
-// trustedKeys — INCLUDING, until backend M4 ships a signing algorithm, every envelope there
-// is: the verification stub can reject a forgery but can never accept one. Rejection is
+// trustedKeys (pure Ed25519 over the payload's exact bytes, backend ADR-0025). Rejection is
 // never fatal — the SDK keeps serving its last verified snapshot.
 func SignatureRequired(trustedKeys map[string][]byte) SignaturePolicy {
 	copied := make(map[string][]byte, len(trustedKeys))
 	for id, key := range trustedKeys {
 		copied[id] = append([]byte(nil), key...)
 	}
-	return SignaturePolicy{required: true, trustedKeys: copied}
+	return SignaturePolicy{explicit: true, required: true, trustedKeys: copied}
+}
+
+// productionKeyHex is the raw 32-byte public key FortressFlag production signs with, keyed
+// prod-2026-09-k1 (ADR-0025; also published on docs.fortressflag.com/concepts/payload-signing).
+// Rotation adds key N+1 here before the backend switches to it; retire N one release later.
+// ADR-0025, minted 2026-09-16 (base64url: EaEF8MHNu3onHxemTg3-OcrKrq7ODsZIVEp-IVV2ojg)
+// A PUBLIC key: the scanner's generic rule matches any 64-hex literal beside the word "key".
+const productionKeyHex = "11a105f0c1cdbb7a271f17a64e0dfe39cacaaeaece0ec648544a7e215576a238" // gitleaks:allow
+
+// TrustedKeysFortressFlagProduction is the trust store the default policy verifies against:
+// the production signing key(s) by key ID. Staging signs with a different key — pass it
+// explicitly via SignatureRequired.
+var TrustedKeysFortressFlagProduction = map[string][]byte{
+	"prod-2026-09-k1": decodeKeyHex(productionKeyHex),
+}
+
+// decodeKeyHex returns nil on a malformed literal rather than panicking: a nil key is
+// unknownKeyId in the verifier, so a bad constant fails closed instead of crashing the host.
+func decodeKeyHex(s string) []byte {
+	key, err := hex.DecodeString(s)
+	if err != nil {
+		return nil
+	}
+	return key
 }
 
 // defaultBaseURL is FortressFlag's server data plane.
@@ -185,13 +214,18 @@ func resolveConfiguration(configuration Configuration) (resolvedConfiguration, e
 		timeout = defaultHTTPTimeout
 	}
 
+	signature := configuration.Signature
+	if !signature.explicit {
+		signature = SignatureRequired(TrustedKeysFortressFlagProduction)
+	}
+
 	return resolvedConfiguration{
 		key:         configuration.Key,
 		environment: environment,
 		baseURL:     baseURL,
 		interval:    interval,
 		cachePath:   configuration.CachePath,
-		signature:   configuration.Signature,
+		signature:   signature,
 		httpTimeout: timeout,
 	}, nil
 }

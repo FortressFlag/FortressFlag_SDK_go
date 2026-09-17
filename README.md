@@ -26,5 +26,10 @@ It implements
 evaluation never returns an error and never panics. See `CLAUDE.md` for the rules this repo
 holds itself to.
 
+Every ruleset the SDK accepts carries an Ed25519 signature verified in-process against the
+FortressFlag production key it ships with (backend ADR-0025); a tampered or unsigned payload
+is rejected and the last verified ruleset keeps serving. Against a local backend that does not
+sign, pass `Signature: fortressflag.SignatureDisabled` explicitly.
+
 **The `ffs_` server key is a genuine secret** — treat it like a database password. Store it in
 an environment variable or a secret manager, never in code or logs.

@@ -6,7 +6,8 @@ import (
 )
 
 // The public surface of the SDK, enumerated in this one file (plus Configuration,
-// SignaturePolicy, SignatureDisabled, SignatureRequired and ErrMalformedKey in
+// SignaturePolicy, SignatureDisabled, SignatureRequired, TrustedKeysFortressFlagProduction
+// and ErrMalformedKey in
 // configuration.go, which this list is the index of). Everything else in the package is
 // internal. From the first release onward this surface is backward-compatibility sacred
 // (Founding §5, §8.3): we cannot recall a shipped SDK.
