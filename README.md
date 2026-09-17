@@ -4,6 +4,9 @@ The FortressFlag **Go server SDK** (backend ADR-0016): polls the server data pla
 export with an `ffs_` server key and evaluates flags **locally, in-process** — no network hop
 per flag check.
 
+> **ADR-nnnn** refers to FortressFlag's internal architecture decision records. The public
+> contract every SDK implements is `FortressFlag_Standards`; decision records are not published.
+
 ```go
 client, err := fortressflag.New(fortressflag.Configuration{
 	Key: os.Getenv("FF_SERVER_KEY"),
